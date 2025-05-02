@@ -72,27 +72,54 @@
 
 ### Настройка автомонтирования USB-накопителя
 
-1. Создайте точку монтирования:
-   ```bash
-   sudo mkdir -p /mnt/usb
-   ```
+Сначала определите, как система видит ваш USB-диск:
 
-2. Определите UUID вашего USB-накопителя:
-   ```bash
-   sudo blkid
-   ```
+```bash
+sudo fdisk -l
+```
 
-3. Отредактируйте файл /etc/fstab:
-   ```bash
-   sudo nano /etc/fstab
-   ```
+или
 
-4. Добавьте строку (замените UUID на ваш):
-   ```
-   UUID=ваш-UUID-диска  /mnt/usb  ext4  defaults  0  0
-   ```
+```bash
+lsblk
+```
 
-5. Создайте структуру директорий:
+Создайте точку монтирования:
+
+```bash
+sudo mkdir -p /mnt/usb
+```
+
+Создайте файл systemd для монтирования:
+
+```bash
+sudo nano /etc/systemd/system/mnt-usb.mount
+```
+
+Содержимое файла:
+```
+[Unit]
+Description=Mount USB Drive
+DefaultDependencies=no
+Before=local-fs.target
+
+[Mount]
+What=/dev/sda1  # Замените на ваше устройство
+Where=/mnt/usb
+Type=auto
+Options=defaults,nofail
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Включите автозапуск монтирования:
+
+```bash
+sudo systemctl enable mnt-usb.mount
+```
+
+Создайте структуру директорий:
    ```bash
    sudo mkdir -p /mnt/usb/multimedia/music
    sudo mkdir -p /mnt/usb/multimedia/playlists
@@ -101,17 +128,12 @@
 
 ### Настройка MPD
 
-1. Остановите службу MPD для редактирования конфигурации:
-   ```bash
-   sudo systemctl stop mpd
-   ```
-
-2. Отредактируйте конфигурационный файл:
+Отредактируйте конфигурационный файл:
    ```bash
    sudo nano /etc/mpd.conf
    ```
 
-3. Настройте следующие параметры:
+Настройте следующие параметры:
    ```
 	music_directory "/mnt/usb/multimedia"
 	playlist_directory "/mnt/usb/multimedia/playlists"
@@ -132,56 +154,68 @@
 		format "44100:16:2"
    ```
 
-4. Перезапустите MPD:
+
+Остановите службу MPD для редактирования конфигурации:
    ```bash
-   sudo systemctl start mpd
-   sudo systemctl enable mpd
+   sudo systemctl stop mpd
    ```
 
-### Настройка Flask приложения
+Создайте переопределение для службы MPD, чтобы она запускалась после монтирования USB-диска:
 
-1. Скопируйте файлы сервера в директорию `/home/pi/music_server`:
-   ```bash
-   mkdir -p /home/pi/music_server
-   # Скопируйте файлы app.py, list.py, playlist.py и т.д.
-   ```
+```bash
+sudo mkdir -p /etc/systemd/system/mpd.service.d/
+sudo nano /etc/systemd/system/mpd.service.d/override.conf
+```
 
-2. Создайте сервис для автозапуска:
-   ```bash
-   sudo nano /etc/systemd/system/music-server.service
-   ```
+Содержимое файла:
+```
+[Unit]
+After=mnt-usb.mount
+Requires=mnt-usb.mount
+```
 
-3. Содержимое файла:
-   ```
-   [Unit]
-   Description=Music Server API
-   After=mpd.service
-   
-   [Service]
-   User=pi
-   WorkingDirectory=/home/pi/music_server
-   ExecStart=/usr/bin/python3 app.py
-   Restart=always
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
+Включите автозапуск MPD:
 
-4. Включите и запустите сервис:
-   ```bash
-   sudo systemctl enable music-server
-   sudo systemctl start music-server
-   ```
+```bash
+sudo systemctl enable mpd.service
+```
 
-### Настройка VPN (опционально)
 
-Если требуется удаленный доступ к Raspberry Pi через интернет, рекомендуется настроить VPN, например, с помощью WireGuard или OpenVPN.
+### Настройка MPC
 
-### Настройка Syncthing (опционально)
+Создайте сервис для запуска команд MPC после запуска MPD:
 
-Для синхронизации музыкальных файлов между устройствами:
+```bash
+sudo nano /etc/systemd/system/mpc-startup.service
+```
 
-1. Установка Syncthing:
+Содержимое файла:
+```
+[Unit]
+Description=MPC Startup Commands
+After=mpd.service
+Requires=mpd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mpc clear
+ExecStart=/usr/bin/mpc update
+ExecStart=/usr/bin/mpc random on
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Включите автозапуск:
+
+```bash
+sudo systemctl enable mpc-startup.service
+```
+
+### Установка и настройка Syncthing
+
+Установка Syncthing:
    ```bash
    curl -s https://syncthing.net/release-key.txt | sudo apt-key add -
    echo "deb https://apt.syncthing.net/ syncthing stable" | sudo tee /etc/apt/sources.list.d/syncthing.list
@@ -189,11 +223,140 @@
    sudo apt install syncthing
    ```
 
-2. Создание сервиса:
+Создайте переопределение для Syncthing, чтобы он запускался после MPD:
+
+```bash
+sudo mkdir -p /etc/systemd/system/syncthing@pi.service.d/
+sudo nano /etc/systemd/system/syncthing@pi.service.d/override.conf
+```
+
+Содержимое файла (замените `pi` на имя вашего пользователя, если оно отличается):
+```
+[Unit]
+After=mpd.service
+Requires=mpd.service
+```
+
+Включите автозапуск Syncthing:
+
+```bash
+sudo systemctl enable syncthing@pi.service
+```
+
+### Запуск Python-приложения
+
+
+Скопируйте файлы сервера в директорию `/mnt/usb/utils`:
    ```bash
-   sudo systemctl enable syncthing@pi
-   sudo systemctl start syncthing@pi
+   mkdir -p /mnt/usb/utils
+   # Скопируйте файлы app.py, list.py, playlist.py и т.д.
    ```
+
+Создайте сервис для запуска Python-приложения:
+
+```bash
+sudo nano /etc/systemd/system/my-python-app.service
+```
+
+Содержимое файла:
+```
+[Unit]
+Description=My Python Application
+After=syncthing@pi.service mpc-startup.service
+Requires=mnt-usb.mount
+Wants=syncthing@pi.service mpc-startup.service
+
+[Service]
+Type=simple
+User=pi  # Замените на имя вашего пользователя
+Group=pi  # И соответствующую группу
+WorkingDirectory=/mnt/usb/utils
+Environment=PYTHONPATH=/mnt/usb/utils
+ExecStart=/usr/bin/python3 /mnt/usb/utils/app.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Включите автозапуск:
+
+```bash
+sudo systemctl enable my-python-app.service
+```
+
+### Настройка обратного SSH-туннеля
+
+Это позволит удаленно управлять Raspberry Pi через туннель к вашему серверу.
+
+#### Создание SSH-ключа для беспарольного доступа
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+ssh-copy-id -i ~/.ssh/id_ed25519.pub username@your-server-ip
+```
+
+#### Создание сервиса для туннеля
+
+```bash
+sudo nano /etc/systemd/system/reverse-ssh.service
+```
+
+Содержимое файла:
+```
+[Unit]
+Description=Reverse SSH Tunnel
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/usr/bin/ssh -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -N -R 0.0.0.0:10022:localhost:22 username@your-server-ip
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Включите автозапуск туннеля:
+
+```bash
+sudo systemctl enable reverse-ssh.service
+```
+
+#### Настройка сервера
+
+На удаленном сервере откройте файл конфигурации SSH:
+
+```bash
+sudo nano /etc/ssh/sshd_config
+```
+
+Добавьте или измените следующие строки:
+```
+GatewayPorts yes
+AllowTcpForwarding yes
+```
+
+Перезапустите SSH-сервер:
+```bash
+sudo systemctl restart sshd
+```
+
+#### Подключение к Raspberry Pi через туннель
+
+На удаленном сервере выполните:
+```bash
+ssh -p 10022 pi@localhost
+```
+
+
+
+
+
 
 ## Установка клиентской части (ESP32)
 
@@ -268,249 +431,7 @@
   python3 rename.py
   ```
 
-# Настройка автоматического запуска сервисов на Raspberry Pi
 
-Это руководство описывает процесс настройки автоматического запуска нескольких сервисов на Raspberry Pi с Raspbian в правильной последовательности.
-
-## Содержание
-
-1. [Монтирование USB-диска](#монтирование-usb-диска)
-2. [Настройка MPD](#настройка-mpd)
-3. [Настройка MPC](#настройка-mpc)
-4. [Настройка Syncthing](#настройка-syncthing)
-5. [Запуск Python-приложения](#запуск-python-приложения)
-6. [Настройка обратного SSH-туннеля](#настройка-обратного-ssh-туннеля)
-7. [Дополнительные настройки](#дополнительные-настройки)
-
-## Монтирование USB-диска
-
-Сначала определите, как система видит ваш USB-диск:
-
-```bash
-sudo fdisk -l
-```
-
-или
-
-```bash
-lsblk
-```
-
-Создайте точку монтирования:
-
-```bash
-sudo mkdir -p /mnt/usb
-```
-
-Создайте файл systemd для монтирования:
-
-```bash
-sudo nano /etc/systemd/system/mnt-usb.mount
-```
-
-Содержимое файла:
-```
-[Unit]
-Description=Mount USB Drive
-DefaultDependencies=no
-Before=local-fs.target
-
-[Mount]
-What=/dev/sda1  # Замените на ваше устройство
-Where=/mnt/usb
-Type=auto
-Options=defaults,nofail
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Включите автозапуск монтирования:
-
-```bash
-sudo systemctl enable mnt-usb.mount
-```
-
-## Настройка MPD
-
-Создайте переопределение для службы MPD, чтобы она запускалась после монтирования USB-диска:
-
-```bash
-sudo mkdir -p /etc/systemd/system/mpd.service.d/
-sudo nano /etc/systemd/system/mpd.service.d/override.conf
-```
-
-Содержимое файла:
-```
-[Unit]
-After=mnt-usb.mount
-Requires=mnt-usb.mount
-```
-
-Включите автозапуск MPD:
-
-```bash
-sudo systemctl enable mpd.service
-```
-
-## Настройка MPC
-
-Создайте сервис для запуска команд MPC после запуска MPD:
-
-```bash
-sudo nano /etc/systemd/system/mpc-startup.service
-```
-
-Содержимое файла:
-```
-[Unit]
-Description=MPC Startup Commands
-After=mpd.service
-Requires=mpd.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/mpc clear
-ExecStart=/usr/bin/mpc update
-ExecStart=/usr/bin/mpc random on
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Включите автозапуск:
-
-```bash
-sudo systemctl enable mpc-startup.service
-```
-
-## Настройка Syncthing
-
-Создайте переопределение для Syncthing, чтобы он запускался после MPD:
-
-```bash
-sudo mkdir -p /etc/systemd/system/syncthing@pi.service.d/
-sudo nano /etc/systemd/system/syncthing@pi.service.d/override.conf
-```
-
-Содержимое файла (замените `pi` на имя вашего пользователя, если оно отличается):
-```
-[Unit]
-After=mpd.service
-Requires=mpd.service
-```
-
-Включите автозапуск Syncthing:
-
-```bash
-sudo systemctl enable syncthing@pi.service
-```
-
-## Запуск Python-приложения
-
-Создайте сервис для запуска Python-приложения:
-
-```bash
-sudo nano /etc/systemd/system/my-python-app.service
-```
-
-Содержимое файла:
-```
-[Unit]
-Description=My Python Application
-After=syncthing@pi.service mpc-startup.service
-Requires=mnt-usb.mount
-Wants=syncthing@pi.service mpc-startup.service
-
-[Service]
-Type=simple
-User=pi  # Замените на имя вашего пользователя
-Group=pi  # И соответствующую группу
-WorkingDirectory=/mnt/usb/utils
-Environment=PYTHONPATH=/mnt/usb/utils
-ExecStart=/usr/bin/python3 /mnt/usb/utils/app.py
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Включите автозапуск:
-
-```bash
-sudo systemctl enable my-python-app.service
-```
-
-## Настройка обратного SSH-туннеля
-
-Это позволит удаленно управлять Raspberry Pi через туннель к вашему серверу.
-
-### Создание SSH-ключа для беспарольного доступа
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
-ssh-copy-id -i ~/.ssh/id_ed25519.pub username@your-server-ip
-```
-
-### Создание сервиса для туннеля
-
-```bash
-sudo nano /etc/systemd/system/reverse-ssh.service
-```
-
-Содержимое файла:
-```
-[Unit]
-Description=Reverse SSH Tunnel
-After=network.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=pi
-ExecStart=/usr/bin/ssh -o ServerAliveInterval=60 -o ExitOnForwardFailure=yes -N -R 0.0.0.0:10022:localhost:22 username@your-server-ip
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Включите автозапуск туннеля:
-
-```bash
-sudo systemctl enable reverse-ssh.service
-```
-
-### Настройка сервера
-
-На удаленном сервере откройте файл конфигурации SSH:
-
-```bash
-sudo nano /etc/ssh/sshd_config
-```
-
-Добавьте или измените следующие строки:
-```
-GatewayPorts yes
-AllowTcpForwarding yes
-```
-
-Перезапустите SSH-сервер:
-```bash
-sudo systemctl restart sshd
-```
-
-### Подключение к Raspberry Pi через туннель
-
-На удаленном сервере выполните:
-```bash
-ssh -p 10022 pi@localhost
-```
-
-## Дополнительные настройки
 
 ### Исправление ошибки "unable to resolve host"
 
@@ -532,6 +453,8 @@ sudo nano /etc/hosts
 
 # Остальные строки...
 ```
+
+
 
 ### Управление сервисами
 
@@ -561,9 +484,6 @@ sudo journalctl -u имя_сервиса.service
 ```
 
 ---
-
-Эта конфигурация обеспечивает правильную последовательность запуска всех компонентов системы при загрузке Raspberry Pi.
-
 
 
 
