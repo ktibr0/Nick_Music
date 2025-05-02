@@ -417,8 +417,8 @@ ssh -p 10022 pi@localhost
   - Предыдущий трек: GPIO13
   - Воспроизведение/Пауза: GPIO15
 
+![circuit_image](https://github.com/user-attachments/assets/6141e4ac-c05b-4bb8-a194-ce822f5e7f73)
 
-![circuit_image (1)](https://github.com/user-attachments/assets/a7816266-9db1-40db-a887-82bfae9da7c5)
 
 ## Утилиты
 
