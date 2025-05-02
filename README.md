@@ -456,37 +456,6 @@ sudo nano /etc/hosts
 
 
 
-### Управление сервисами
-
-Проверка статуса сервиса:
-```bash
-sudo systemctl status имя_сервиса.service
-```
-
-Запуск сервиса:
-```bash
-sudo systemctl start имя_сервиса.service
-```
-
-Остановка сервиса:
-```bash
-sudo systemctl stop имя_сервиса.service
-```
-
-Перезапуск сервиса:
-```bash
-sudo systemctl restart имя_сервиса.service
-```
-
-Просмотр логов сервиса:
-```bash
-sudo journalctl -u имя_сервиса.service
-```
-
----
-
-
-
 ## Использование
 
 ### Подготовка музыкальной библиотеки
